@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+    <head>
+    </head>
+    <body>
+        <svg id="GeometircSpace" width="1024px" height="512px"><g id="Curve"></g><g id="RecursiveInterpolation"></g><g id="ControlPoints"></g></svg><br/>
+        <svg id="ParametricSpace" width="1024px" height="128px"><g id="KnotMarks"></g><g id="BasisFunctionGraphs"></g></svg><br/>
+        Parameter: u = <input id="Parameter" type="range" step="0.01"/><br/>
+        <!-- Closed: <input id="Closed" type="checkbox"/><br/> -->
+        Degree: d = <input id="Degree" type="number" value="0" min="0" step="1" style="width: 50px;"/><br/>
+        Knot Count: |K| = <input id="KnotCount" type="number" value="1" min="1" step="1" style="width: 50px;"/><br/>
+        Multiplicity = {<span id="Multiplicity"></span>}<br/>
+        Knot Spans (Cumulative): K = {<span id="CumulativeKnotSpans"></span>}<br/>
+        <div id="KnotSpans"></div>
+
+        <script type="module">
+        //<!--
+        import {vec2, vec3} from './gl-matrix/index.js';
+        import NURBS from './nurbs.js';
+
+        function createElement(tag, parentNode) {
+            const svgElement = document.createElementNS('http://www.w3.org/2000/svg', tag);
+            if(parentNode)
+                parentNode.appendChild(svgElement);
+            return svgElement;
+        }
+
+        function syncElementList(parentNode, targetCount, createCallback) {
+            while(parentNode.childNodes.length < targetCount)
+                createCallback();
+            while(parentNode.childNodes.length > targetCount)
+                parentNode.removeChild(parentNode.childNodes[targetCount]);
+        }
+
+        function updateParametricSpace(nurbs) {
+            Parameter.setAttribute('min', (nurbs.cumulativeKnotSpans.length <= nurbs.degree) ? 0 : nurbs.cumulativeKnotSpans[nurbs.degree]);
+            Parameter.setAttribute('max', (nurbs.cumulativeKnotSpans.length-nurbs.degree-1 < 0) ? 0 : nurbs.cumulativeKnotSpans[nurbs.cumulativeKnotSpans.length-nurbs.degree-1]);
+            const parameterRange = nurbs.cumulativeKnotSpans[nurbs.cumulativeKnotSpans.length-1]-nurbs.cumulativeKnotSpans[0],
+                  boundingRect = ParametricSpace.getBoundingClientRect(),
+                  paddingX = 5, paddingY = 5,
+                  width = boundingRect.width-paddingX*2,
+                  height = boundingRect.height-paddingY*2,
+                  baseLineY = boundingRect.height-paddingY;
+            syncElementList(KnotMarks, nurbs.cumulativeKnotSpans.length, () => {
+                const Mark = createElement('rect', KnotMarks);
+                Mark.setAttribute('y', paddingY);
+                Mark.setAttribute('width', 0.5);
+                Mark.setAttribute('height', height);
+            });
+            for(let knotIndex = 0; knotIndex < nurbs.cumulativeKnotSpans.length; ++knotIndex)
+                KnotMarks.childNodes[knotIndex].setAttribute('x', (parameterRange == 0) ? paddingX : Math.round(paddingX+width*(nurbs.cumulativeKnotSpans[knotIndex]-nurbs.cumulativeKnotSpans[0])/parameterRange));
+            if(nurbs.maxKnotIndex <= 0) {
+                BasisFunctionGraphs.innerHTML = '';
+                return;
+            }
+            if(BasisFunctionGraphs.childNodes.length != nurbs.maxKnotIndex) {
+                syncElementList(BasisFunctionGraphs, nurbs.maxKnotIndex, () => {
+                    const BasisFunctionGraph = createElement('path', BasisFunctionGraphs);
+                    BasisFunctionGraph.setAttribute('fill', 'none');
+                    BasisFunctionGraph.setAttribute('stroke-width', '2px');
+                });
+                for(let knotIndex = 0; knotIndex < nurbs.maxKnotIndex; ++knotIndex)
+                    BasisFunctionGraphs.childNodes[knotIndex].setAttribute('stroke', `rgb(${Math.round(knotIndex/nurbs.maxKnotIndex*255)}, ${Math.round((1-knotIndex/nurbs.maxKnotIndex)*255)}, 255)`);
+            }
+            for(let knotIndex = 0; knotIndex < nurbs.maxKnotIndex; ++knotIndex) {
+                let x = Math.round(width*(nurbs.cumulativeKnotSpans[knotIndex]-nurbs.cumulativeKnotSpans[0])/parameterRange),
+                    data = `M${paddingX+x-1} ${baseLineY}`;
+                while(true) {
+                    const parameter = nurbs.cumulativeKnotSpans[0]+x/width*parameterRange;
+                    if(parameter > nurbs.cumulativeKnotSpans[knotIndex+nurbs.degree+1]) {
+                        data += `L${paddingX+x} ${baseLineY}`;
+                        break;
+                    }
+                    const value = nurbs.basisFunction(parameter, knotIndex);
+                    data += `L${paddingX+x} ${baseLineY-height*value}`;
+                    ++x;
+                }
+                BasisFunctionGraphs.childNodes[knotIndex].setAttribute('d', data);
+            }
+        }
+
+        function updateGeometircSpace(nurbs, stepCount=100) {
+            Curve.innerHTML = '';
+            ControlPoints.innerHTML = '';
+            if(nurbs.maxKnotIndex > 0) {
+                for(let knotIndex = nurbs.degree; knotIndex <= nurbs.maxKnotIndex; ++knotIndex) {
+                    const color = `rgb(${Math.round(knotIndex/nurbs.maxKnotIndex*255)}, 235, ${Math.round((1-knotIndex/nurbs.maxKnotIndex)*255)})`;
+                    if(knotIndex < nurbs.maxKnotIndex && nurbs.degree > 0) {
+                        let data = '';
+                        for(let step = 0; step < stepCount; ++step) {
+                            const parameter = nurbs.cumulativeKnotSpans[knotIndex]+(nurbs.cumulativeKnotSpans[knotIndex+1]-nurbs.cumulativeKnotSpans[knotIndex])*step/(stepCount-1),
+                                  point = NURBS.projectHomogenousCoordinates(nurbs.deBoor(parameter, knotIndex));
+                            data += `${(data.length == 0) ? 'M' : 'L'}${point[0]} ${point[1]}\n`;
+                        }
+                        const Path = createElement('path', Curve);
+                        Path.setAttribute('fill', 'none');
+                        Path.setAttribute('stroke', color);
+                        Path.setAttribute('stroke-width', '2px');
+                        Path.setAttribute('d', data);
+                    }
+                    const point = NURBS.projectHomogenousCoordinates(nurbs.deBoor(nurbs.cumulativeKnotSpans[knotIndex], knotIndex));
+                    const CurvePoint = createElement('circle', Curve);
+                    CurvePoint.setAttribute('fill', 'none');
+                    CurvePoint.setAttribute('stroke', color);
+                    CurvePoint.setAttribute('stroke-width', '2px');
+                    CurvePoint.setAttribute('cx', point[0]);
+                    CurvePoint.setAttribute('cy', point[1]);
+                    CurvePoint.setAttribute('r', 3);
+                }
+            }
+            for(let i = 0; i < nurbs.controlPoints.length; ++i) {
+                const ControlPoint = createElement('circle', ControlPoints);
+                ControlPoint.setAttribute('fill', 'none');
+                ControlPoint.setAttribute('stroke', 'red');
+                ControlPoint.setAttribute('stroke-width', '2px');
+                ControlPoint.setAttribute('cx', nurbs.controlPoints[i][0]/nurbs.controlPoints[i][2]);
+                ControlPoint.setAttribute('cy', nurbs.controlPoints[i][1]/nurbs.controlPoints[i][2]);
+                ControlPoint.setAttribute('r', 5);
+            }
+        }
+
+        function updateRecursiveInterpolation(nurbs) {
+            RecursiveInterpolation.innerHTML = '';
+            const parameter = Parameter.value,
+                  knotIndex = Math.max(nurbs.degree, Math.min(nurbs.knotIndexAtParameter(parameter), nurbs.controlPoints.length-1)),
+                  deBoor = nurbs.deBoorIntermediateSteps(parameter, knotIndex),
+                  DeBoorPath = createElement('path', RecursiveInterpolation);
+            DeBoorPath.setAttribute('fill', 'none');
+            DeBoorPath.setAttribute('stroke', 'black');
+            DeBoorPath.setAttribute('stroke-width', '2px');
+            let data = '';
+            for(let r = 0; r < nurbs.degree; ++r)
+                for(let j = nurbs.degree; j >= r; --j) {
+                    const endPoint = NURBS.projectHomogenousCoordinates(deBoor[r][j]);
+                    data += `${(j == nurbs.degree) ? 'M' : 'L'}${endPoint[0]} ${endPoint[1]}`;
+                    if(r == j)
+                        continue;
+                    const touchPoint = NURBS.projectHomogenousCoordinates(deBoor[r+1][j]);
+                    const TouchPoint = createElement('circle', RecursiveInterpolation);
+                    TouchPoint.setAttribute('fill', 'black');
+                    TouchPoint.setAttribute('cx', touchPoint[0]);
+                    TouchPoint.setAttribute('cy', touchPoint[1]);
+                    TouchPoint.setAttribute('r', 2);
+                }
+            DeBoorPath.setAttribute('d', data);
+        }
+
+        function update(nurbs) {
+            nurbs.degree = parseInt(Degree.value);
+            const maxKnotCount = nurbs.controlPoints.length+nurbs.degree+1;
+            KnotCount.setAttribute('max', maxKnotCount);
+            if(KnotCount.value > maxKnotCount) {
+                KnotCount.value = maxKnotCount;
+                syncElementList(KnotSpans, KnotCount.value);
+            }
+            nurbs.knotSpans = [];
+            for(let i = 0; i < KnotCount.value; ++i) {
+                let knotSpan = parseFloat(KnotSpans.childNodes[i].childNodes[0].value);
+                if(i > 0) {
+                    knotSpan = Math.exp(knotSpan);
+                    if(knotSpan < 0.01)
+                        knotSpan = 0.0;
+                }
+                KnotSpans.childNodes[i].childNodes[1].innerText = knotSpan.toFixed(3);
+                nurbs.knotSpans.push(knotSpan);
+            }
+            nurbs.updateKnotSpans();
+            Multiplicity.innerText = nurbs.multiplicity.join(', ');
+            CumulativeKnotSpans.innerText = nurbs.cumulativeKnotSpans.map((value) => value.toFixed(3)).join(', ');
+            updateParametricSpace(nurbs);
+            updateGeometircSpace(nurbs);
+        }
+
+        const nurbs = new NURBS();
+        for(let i = 0; i < 6; ++i) {
+            const angle = i/3*Math.PI*2;
+            nurbs.controlPoints.push(NURBS.makeHomogenousCoordinates(256+Math.sin(angle)*256, 256+Math.cos(angle)*256, 1));
+        }
+
+        Parameter.oninput = (event) => updateRecursiveInterpolation(nurbs);
+        Degree.onchange = (event) => update(nurbs);
+        KnotCount.onchange = () => {
+            syncElementList(KnotSpans, KnotCount.value, () => {
+                const KnotSpanRow = document.createElement('div'),
+                      KnotSpanInput = document.createElement('input'),
+                      KnotSpanOutput = document.createElement('span');
+                KnotSpanRow.appendChild(KnotSpanInput);
+                KnotSpanRow.appendChild(KnotSpanOutput);
+                KnotSpans.appendChild(KnotSpanRow);
+                KnotSpanInput.setAttribute('type', 'range');
+                KnotSpanInput.setAttribute('min', '-5.0');
+                KnotSpanInput.setAttribute('max', '5.0');
+                KnotSpanInput.setAttribute('value', '0.0');
+                KnotSpanInput.setAttribute('step', '0.1');
+                KnotSpanInput.oninput = Degree.onchange;
+            });
+            update(nurbs);
+        };
+        KnotCount.onchange();
+
+        //-->
+        </script>
+    </body>
+</html>
