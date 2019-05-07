@@ -14,7 +14,7 @@
             <g id="BasisFunctionGraphs"></g>
         </svg><br/>
         Parameter: u = <input id="Parameter" type="range" step="0.01"/><br/>
-        <!-- Closed: <input id="Closed" type="checkbox"/><br/> -->
+        Actions: <input id="InsertKnot" type="button" value="Insert Knot"/><br/>
         Degree: d = <input id="Degree" type="number" value="0" min="0" step="1" style="width: 50px;"/><br/>
         Knot Count: |K| = <input id="KnotCount" type="number" value="1" min="1" step="1" style="width: 50px;"/><br/>
         Multiplicity = {<span id="Multiplicity"></span>}<br/>
@@ -182,6 +182,11 @@
         }
 
         Parameter.oninput = (event) => updateRecursiveInterpolation(nurbs);
+        InsertKnot.onclick = (event) => {
+            nurbs.insertKnotAt(parseFloat(Parameter.value));
+            ++KnotCount.value;
+            KnotCount.onchange();
+        };
         Degree.onchange = (event) => update(nurbs);
         KnotCount.onchange = () => {
             syncElementList(KnotSpans, KnotCount.value, () => {
@@ -198,6 +203,8 @@
                 KnotSpanInput.setAttribute('step', '0.1');
                 KnotSpanInput.oninput = Degree.onchange;
             });
+            for(let i = 0; i < Math.min(nurbs.knotSpans.length, KnotSpans.childNodes.length); ++i)
+                KnotSpans.childNodes[i].childNodes[0].value = Math.log(nurbs.knotSpans[i]);
             update(nurbs);
         };
         KnotCount.onchange();

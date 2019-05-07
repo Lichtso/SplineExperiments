@@ -55,8 +55,10 @@ export default class NURBS {
     }
 
     basisWeightFunction(parameter, knotIndex, degree) {
-        const divisor = this.cumulativeKnotSpans[knotIndex+degree]-this.cumulativeKnotSpans[knotIndex];
-        return (divisor == 0.0) ? 1.0 : (parameter-this.cumulativeKnotSpans[knotIndex])/divisor;
+        const knotBegin = this.cumulativeKnotSpans[knotIndex],
+              knotEnd = this.cumulativeKnotSpans[knotIndex+degree],
+              divisor = knotEnd-knotBegin;
+        return (divisor == 0.0) ? 1.0 : (parameter-knotBegin)/divisor;
     }
 
     basisFunction(parameter, knotIndex, degree=this.degree) {
@@ -92,5 +94,21 @@ export default class NURBS {
             }
         }
         return results;
+    }
+
+    // Wolfgang Böhm Algorithm
+    insertKnotAt(parameter) {
+        let knotIndex = this.knotIndexAtParameter(parameter);
+        const knotSpan = parameter-this.cumulativeKnotSpans[knotIndex++],
+              newControlPoints = [];
+        for(let i = knotIndex-this.degree; i < knotIndex; ++i) {
+            const controlPoint = vec3.create();
+            vec3.lerp(controlPoint, this.controlPoints[i-1], this.controlPoints[i], (parameter-this.cumulativeKnotSpans[i])/(this.cumulativeKnotSpans[i+this.degree]-this.cumulativeKnotSpans[i]));
+            newControlPoints.push(controlPoint);
+        }
+        this.controlPoints.splice(knotIndex-this.degree, this.degree-1, ...newControlPoints);
+        this.knotSpans[knotIndex] -= knotSpan;
+        this.knotSpans.splice(knotIndex, 0, knotSpan);
+        this.updateKnotSpans();
     }
 };
