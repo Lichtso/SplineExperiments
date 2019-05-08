@@ -13,17 +13,16 @@
             <rect id="ParameterMark"></rect>
             <g id="BasisFunctionGraphs"></g>
         </svg><br/>
-        Parameter: u = <input id="Parameter" type="range" step="0.01"/><br/>
-        Actions: <input id="InsertKnot" type="button" value="Insert Knot"/><br/>
+        Parameter: <input id="Parameter" type="range" step="0.01"/> u = <span id="ParameterValue"></span>, i = <span id="KnotIndex"></span><br/>
         Degree: d = <input id="Degree" type="number" value="0" min="0" step="1" style="width: 50px;"/><br/>
-        Knot Count: |K| = <input id="KnotCount" type="number" value="1" min="1" step="1" style="width: 50px;"/><br/>
+        Knot Count: |K| = <input id="KnotCount" type="number" value="1" min="1" step="1" style="width: 50px;"/> <input id="InsertKnot" type="button" value="Insert Knot"/><br/>
         Multiplicity = {<span id="Multiplicity"></span>}<br/>
         Knot Spans (Cumulative): K = {<span id="CumulativeKnotSpans"></span>}<br/>
         <div id="KnotSpans"></div>
 
         <script type="module">
         //<!--
-        import {vec2, vec3} from './gl-matrix/index.js';
+        import {vec4} from './gl-matrix/index.js';
         import NURBS from './nurbs.js';
 
         const boundingRect = ParametricSpace.getBoundingClientRect(),
@@ -124,14 +123,17 @@
                 ControlPoint.setAttribute('r', 5);
             });
             for(let i = 0; i < nurbs.controlPoints.length; ++i) {
-                ControlPoints.childNodes[i].setAttribute('cx', nurbs.controlPoints[i][0]/nurbs.controlPoints[i][2]);
-                ControlPoints.childNodes[i].setAttribute('cy', nurbs.controlPoints[i][1]/nurbs.controlPoints[i][2]);
+                const controlPoint = NURBS.projectHomogenousCoordinates(nurbs.controlPoints[i]);
+                ControlPoints.childNodes[i].setAttribute('cx', controlPoint[0]);
+                ControlPoints.childNodes[i].setAttribute('cy', controlPoint[1]);
             }
         }
 
         function updateRecursiveInterpolation(nurbs) {
             const parameter = parseFloat(Parameter.value),
-                  knotIndex = Math.max(nurbs.degree, Math.min(nurbs.knotIndexAtParameter(parameter), nurbs.controlPoints.length-1));
+                  knotIndex = nurbs.knotIndexAtParameter(parameter);
+            ParameterValue.innerText = parameter.toFixed(3);
+            KnotIndex.innerText = knotIndex;
             ParameterMark.setAttribute('x', Math.round(paddingX+width*parameter/(nurbs.cumulativeKnotSpans[nurbs.cumulativeKnotSpans.length-1]-nurbs.cumulativeKnotSpans[0])));
             ParameterMark.setAttribute('y', paddingY);
             ParameterMark.setAttribute('width', 0.5);
@@ -140,11 +142,11 @@
             DeBoorPath.setAttribute('fill', 'none');
             DeBoorPath.setAttribute('stroke', '#FC8');
             DeBoorPath.setAttribute('stroke-width', '2px');
-            data = '';
+            let data = '';
             for(let r = 0; r < nurbs.degree; ++r)
-                for(let j = nurbs.degree; j >= r; --j) {
+                for(let j = 0; j <= nurbs.degree-r; ++j) {
                     const endPoint = NURBS.projectHomogenousCoordinates(deBoor[r][j]);
-                    data += `${(j == nurbs.degree) ? 'M' : 'L'}${endPoint[0]} ${endPoint[1]}`;
+                    data += `${(j == 0) ? 'M' : 'L'}${endPoint[0]} ${endPoint[1]}`;
                 }
             DeBoorPath.setAttribute('d', data);
         }
@@ -159,12 +161,10 @@
             }
             nurbs.knotSpans = [];
             for(let i = 0; i < KnotCount.value; ++i) {
-                let knotSpan = parseFloat(KnotSpans.childNodes[i].childNodes[0].value);
-                if(i > 0) {
-                    knotSpan = Math.exp(knotSpan);
-                    if(knotSpan < 0.01)
-                        knotSpan = 0.0;
-                }
+                const slider = KnotSpans.childNodes[i].childNodes[0];
+                let knotSpan = parseFloat(slider.value);
+                if(i > 0)
+                    knotSpan = (knotSpan == slider.min) ? 0.0 : Math.exp(knotSpan);
                 KnotSpans.childNodes[i].childNodes[1].innerText = knotSpan.toFixed(3);
                 nurbs.knotSpans.push(knotSpan);
             }
@@ -178,13 +178,13 @@
         const nurbs = new NURBS();
         for(let i = 0; i < 6; ++i) {
             const angle = i/3*Math.PI*2;
-            nurbs.controlPoints.push(NURBS.makeHomogenousCoordinates(256+Math.sin(angle)*256, 256+Math.cos(angle)*256, 1));
+            nurbs.controlPoints.push(NURBS.makeHomogenousCoordinates(256+Math.sin(angle)*256, 256+Math.cos(angle)*256, 0, 1));
         }
 
         Parameter.oninput = (event) => updateRecursiveInterpolation(nurbs);
         InsertKnot.onclick = (event) => {
             nurbs.insertKnotAt(parseFloat(Parameter.value));
-            ++KnotCount.value;
+            KnotCount.value = nurbs.knotSpans.length;
             KnotCount.onchange();
         };
         Degree.onchange = (event) => update(nurbs);
@@ -203,8 +203,11 @@
                 KnotSpanInput.setAttribute('step', '0.1');
                 KnotSpanInput.oninput = Degree.onchange;
             });
-            for(let i = 0; i < Math.min(nurbs.knotSpans.length, KnotSpans.childNodes.length); ++i)
-                KnotSpans.childNodes[i].childNodes[0].value = Math.log(nurbs.knotSpans[i]);
+            for(let i = 0; i < Math.min(nurbs.knotSpans.length, KnotSpans.childNodes.length); ++i) {
+                const slider = KnotSpans.childNodes[i].childNodes[0],
+                      knotSpan = nurbs.knotSpans[i];
+                slider.value = (i == 0) ? knotSpan : ((knotSpan == 0) ? slider.min : Math.log(knotSpan));
+            }
             update(nurbs);
         };
         KnotCount.onchange();
